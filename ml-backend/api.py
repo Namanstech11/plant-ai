@@ -1,7 +1,7 @@
 """
-PlantGuard AI - FastAPI Backend
-Real ML inference API for plant disease detection.
+PlantGuard AI - FastAPI Backend (Production Ready)
 """
+
 import io
 import json
 from datetime import datetime
@@ -14,37 +14,34 @@ from PIL import Image
 
 from predict import PlantDiseasePredictor
 
+
 app = FastAPI(
     title="PlantGuard AI API",
-    description="Real ML-powered plant disease detection from leaf images",
+    description="ML-powered plant disease detection",
     version="2.0.0",
 )
 
-# CORS for frontend
+# ✅ CORS (important for Vercel frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # later replace with your vercel URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load models at startup
+# ✅ Globals
 predictor = None
 prediction_history = []
 
 
-@app.on_event("startup")
-async def load_models():
-    global predictor
-    try:
-        predictor = PlantDiseasePredictor()
-        print("✅ All models loaded successfully")
-    except FileNotFoundError as e:
-        print(f"⚠️ Models not found: {e}")
-        print("Run 'python train_models.py' first to train models.")
+# ✅ ROOT ROUTE (important for Railway)
+@app.get("/")
+async def root():
+    return {"message": "🌱 PlantGuard AI backend is running"}
 
 
+# ✅ HEALTH CHECK
 @app.get("/health")
 async def health():
     return {
@@ -54,16 +51,29 @@ async def health():
     }
 
 
+# ✅ LOAD MODELS ON STARTUP
+@app.on_event("startup")
+async def load_models():
+    global predictor
+    try:
+        print("🔄 Loading ML models...")
+
+        predictor = PlantDiseasePredictor()
+
+        print("✅ Models loaded successfully")
+
+    except Exception as e:
+        predictor = None
+        print(f"❌ Model loading failed: {e}")
+
+
+# ✅ PREDICTION ENDPOINT
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """
-    Upload a leaf image and get disease prediction from all 4 ML models.
-    Returns real softmax/predict_proba confidence scores.
-    """
     if predictor is None:
         raise HTTPException(
             status_code=503,
-            detail="Models not loaded. Run train_models.py first.",
+            detail="Models not loaded. Check server logs.",
         )
 
     # Validate file type
@@ -72,14 +82,21 @@ async def predict(file: UploadFile = File(...)):
 
     try:
         contents = await file.read()
-        image = Image.open(io.BytesIO(contents))
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file")
 
-    # Run real ML inference
-    result = predictor.predict(image)
+    try:
+        # 🔥 Run ML prediction
+        result = predictor.predict(image)
 
-    # Log prediction
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction failed: {str(e)}",
+        )
+
+    # ✅ Log prediction
     log_entry = {
         "id": len(prediction_history) + 1,
         "timestamp": datetime.now().isoformat(),
@@ -91,24 +108,34 @@ async def predict(file: UploadFile = File(...)):
     return JSONResponse(content=result)
 
 
+# ✅ MODEL METRICS
 @app.get("/models/metrics")
 async def get_model_metrics():
-    """Return real training metrics for all models."""
     metrics_file = Path("models/model_metrics.json")
+
     if not metrics_file.exists():
         raise HTTPException(
-            status_code=404, detail="No metrics found. Train models first."
+            status_code=404,
+            detail="No metrics found. Train models first.",
         )
+
     with open(metrics_file) as f:
         return json.load(f)
 
 
+# ✅ HISTORY
 @app.get("/predictions/history")
 async def get_history():
-    """Return prediction history."""
     return {"predictions": prediction_history}
 
 
+# ✅ LOCAL RUN (for dev only)
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+
+    import os
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("api:app", host="0.0.0.0", port=port)
